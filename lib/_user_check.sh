@@ -39,12 +39,20 @@ ensure_deploy_user() {
     return 1
   fi
 
-  # Criar usuário
-  sudo useradd -m -p $(openssl passwd -crypt "${mysql_root_password}") -s /bin/bash deploy
+  # Criar usuário sem senha primeiro (mais compatível)
+  sudo useradd -m -s /bin/bash deploy
 
   if [ $? -ne 0 ]; then
     printf "${RED} ❌ Erro ao criar usuário deploy${GRAY_LIGHT}\n"
     return 1
+  fi
+
+  # Definir senha usando chpasswd (método mais confiável e compatível)
+  echo "deploy:${mysql_root_password}" | sudo chpasswd
+
+  if [ $? -ne 0 ]; then
+    printf "${YELLOW} ⚠️  Aviso: Erro ao definir senha, mas usuário foi criado${GRAY_LIGHT}\n"
+    # Não falhar aqui, o usuário foi criado
   fi
 
   # Adicionar ao grupo sudo

@@ -63,7 +63,14 @@ Se o erro ainda ocorrer, execute manualmente:
 id deploy
 
 # Se não existir, criar manualmente (substitua SENHA pela senha desejada)
-sudo useradd -m -p $(openssl passwd -crypt "SENHA") -s /bin/bash deploy
+# Método 1: Usando perl (mais compatível)
+sudo useradd -m -p $(perl -e 'print crypt($ARGV[0], "salt")' "SENHA") -s /bin/bash deploy
+
+# Método 2: Criar sem senha e definir depois
+sudo useradd -m -s /bin/bash deploy
+echo "deploy:SENHA" | sudo chpasswd
+
+# Adicionar ao grupo sudo
 sudo usermod -aG sudo deploy
 sudo mkdir -p /home/deploy
 sudo chown deploy:deploy /home/deploy
