@@ -13,22 +13,47 @@ backend_redis_create() {
 
   sleep 2
 
-  sudo su - root <<EOF
-  usermod -aG docker deploy
-  docker run --name redis-${instancia_add} -p ${redis_port}:6379 --restart always --detach redis redis-server --requirepass ${mysql_root_password}
+  # Verificar se o container Redis já existe
+  if docker ps -a --format '{{.Names}}' | grep -q "^redis-${instancia_add}$"; then
+    printf "${YELLOW} ⚠️  Container Redis já existe. Removendo...${GRAY_LIGHT}\n"
+    docker rm -f redis-${instancia_add} 2>/dev/null || true
+  fi
+
+  sudo usermod -aG docker deploy 2>/dev/null || true
   
+  # Criar container Redis
+  if ! docker run --name redis-${instancia_add} -p ${redis_port}:6379 --restart always --detach redis redis-server --requirepass ${mysql_root_password}; then
+    printf "${RED} ❌ Erro ao criar container Redis${GRAY_LIGHT}\n"
+    exit 1
+  fi
+
   sleep 2
-  sudo su - postgres
-  createdb ${instancia_add};
-  psql
-  CREATE USER ${instancia_add} SUPERUSER INHERIT CREATEDB CREATEROLE;
-  ALTER USER ${instancia_add} PASSWORD '${mysql_root_password}';
-  \q
-  exit
-EOF
 
-sleep 2
+  # Verificar se o banco de dados já existe
+  if sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw ${instancia_add}; then
+    printf "${YELLOW} ⚠️  Banco de dados já existe. Removendo...${GRAY_LIGHT}\n"
+    sudo -u postgres dropdb ${instancia_add} 2>/dev/null || true
+  fi
 
+  # Verificar se o usuário já existe
+  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${instancia_add}'" | grep -q 1; then
+    printf "${YELLOW} ⚠️  Usuário já existe. Removendo...${GRAY_LIGHT}\n"
+    sudo -u postgres dropuser ${instancia_add} 2>/dev/null || true
+  fi
+
+  # Criar banco de dados e usuário
+  sudo -u postgres createdb ${instancia_add} || {
+    printf "${RED} ❌ Erro ao criar banco de dados${GRAY_LIGHT}\n"
+    exit 1
+  }
+
+  sudo -u postgres psql -c "CREATE USER ${instancia_add} WITH SUPERUSER INHERIT CREATEDB CREATEROLE PASSWORD '${mysql_root_password}';" || {
+    printf "${RED} ❌ Erro ao criar usuário do banco de dados${GRAY_LIGHT}\n"
+    exit 1
+  }
+
+  printf "${GREEN} ✅ Redis e PostgreSQL configurados com sucesso${GRAY_LIGHT}\n"
+  sleep 2
 }
 
 #######################################
@@ -73,7 +98,7 @@ JWT_REFRESH_SECRET=${jwt_refresh_secret}
 
 REDIS_URI=redis://:${mysql_root_password}@127.0.0.1:${redis_port}
 REDIS_OPT_LIMITER_MAX=1
-REGIS_OPT_LIMITER_DURATION=3000
+REDIS_OPT_LIMITER_DURATION=3000
 
 USER_LIMIT=${max_user}
 CONNECTIONS_LIMIT=${max_whats}
@@ -103,10 +128,20 @@ backend_node_dependencies() {
 
   sleep 2
 
+  if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
+    printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   sudo su - deploy <<EOF
   cd /home/deploy/${instancia_add}/backend
   npm install
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao instalar dependências do backend${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   sleep 2
 }
@@ -123,10 +158,25 @@ backend_node_build() {
 
   sleep 2
 
+  if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
+    printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   sudo su - deploy <<EOF
   cd /home/deploy/${instancia_add}/backend
   npm run build
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao compilar backend${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  if [ ! -f "/home/deploy/${instancia_add}/backend/dist/server.js" ]; then
+    printf "${RED} ❌ Arquivo compilado não encontrado${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   sleep 2
 }
@@ -175,10 +225,20 @@ backend_db_migrate() {
 
   sleep 2
 
+  if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
+    printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   sudo su - deploy <<EOF
   cd /home/deploy/${instancia_add}/backend
   npx sequelize db:migrate
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao executar migrações${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   sleep 2
 }
@@ -195,10 +255,19 @@ backend_db_seed() {
 
   sleep 2
 
+  if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
+    printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   sudo su - deploy <<EOF
   cd /home/deploy/${instancia_add}/backend
   npx sequelize db:seed:all
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${YELLOW} ⚠️  Aviso: Erro ao executar seeds (pode ser normal se já foram executados)${GRAY_LIGHT}\n"
+  fi
 
   sleep 2
 }
@@ -216,10 +285,22 @@ backend_start_pm2() {
 
   sleep 2
 
+  if [ ! -f "/home/deploy/${instancia_add}/backend/dist/server.js" ]; then
+    printf "${RED} ❌ Arquivo compilado não encontrado${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  # Verificar se já existe um processo com esse nome
   sudo su - deploy <<EOF
+  pm2 delete ${instancia_add}-backend 2>/dev/null || true
   cd /home/deploy/${instancia_add}/backend
   pm2 start dist/server.js --name ${instancia_add}-backend
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao iniciar PM2 do backend${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   sleep 2
 }
@@ -238,25 +319,35 @@ backend_nginx_setup() {
 
   backend_hostname=$(echo "${backend_url/https:\/\/}")
 
+  # Verificar se o link simbólico já existe
+  if [ -L /etc/nginx/sites-enabled/${instancia_add}-backend ]; then
+    sudo rm -f /etc/nginx/sites-enabled/${instancia_add}-backend
+  fi
+
 sudo su - root << EOF
-cat > /etc/nginx/sites-available/${instancia_add}-backend << 'END'
+cat > /etc/nginx/sites-available/${instancia_add}-backend << END
 server {
-  server_name $backend_hostname;
+  server_name ${backend_hostname};
   location / {
     proxy_pass http://127.0.0.1:${backend_port};
     proxy_http_version 1.1;
-    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Upgrade \\\$http_upgrade;
     proxy_set_header Connection 'upgrade';
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_cache_bypass \$http_upgrade;
+    proxy_set_header Host \\\$host;
+    proxy_set_header X-Real-IP \\\$remote_addr;
+    proxy_set_header X-Forwarded-Proto \\\$scheme;
+    proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+    proxy_cache_bypass \\\$http_upgrade;
   }
 }
 END
 ln -s /etc/nginx/sites-available/${instancia_add}-backend /etc/nginx/sites-enabled
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao configurar nginx para backend${GRAY_LIGHT}\n"
+    exit 1
+  fi
 
   sleep 2
 }

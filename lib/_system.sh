@@ -32,12 +32,27 @@ system_git_clone() {
   printf "${WHITE} 💻 Fazendo download do código Whaticket...${GRAY_LIGHT}"
   printf "\n\n"
 
-
   sleep 2
+
+  # Verificar se o diretório já existe
+  if [ -d "/home/deploy/${instancia_add}" ]; then
+    printf "${YELLOW} ⚠️  Diretório já existe. Removendo...${GRAY_LIGHT}\n"
+    sudo rm -rf /home/deploy/${instancia_add}
+  fi
 
   sudo su - deploy <<EOF
   git clone ${link_git} /home/deploy/${instancia_add}/
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao clonar repositório Git${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  if [ ! -d "/home/deploy/${instancia_add}" ]; then
+    printf "${RED} ❌ Diretório não foi criado após clone${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   sleep 2
 }
@@ -76,38 +91,60 @@ deletar_tudo() {
 
   sleep 2
 
-  sudo su - root <<EOF
-  docker container rm redis-${empresa_delete} --force
-  cd && rm -rf /etc/nginx/sites-enabled/${empresa_delete}-frontend
-  cd && rm -rf /etc/nginx/sites-enabled/${empresa_delete}-backend  
-  cd && rm -rf /etc/nginx/sites-available/${empresa_delete}-frontend
-  cd && rm -rf /etc/nginx/sites-available/${empresa_delete}-backend
-  
+  # Remover container Redis
+  if docker ps -a --format '{{.Names}}' | grep -q "^redis-${empresa_delete}$"; then
+    printf "${WHITE} 💻 Removendo container Redis...${GRAY_LIGHT}\n"
+    docker container rm redis-${empresa_delete} --force 2>/dev/null || true
+  fi
+
+  # Remover configurações do nginx
+  printf "${WHITE} 💻 Removendo configurações do nginx...${GRAY_LIGHT}\n"
+  sudo rm -f /etc/nginx/sites-enabled/${empresa_delete}-frontend
+  sudo rm -f /etc/nginx/sites-enabled/${empresa_delete}-backend
+  sudo rm -f /etc/nginx/sites-available/${empresa_delete}-frontend
+  sudo rm -f /etc/nginx/sites-available/${empresa_delete}-backend
+
+  # Remover certificados SSL do certbot (se existirem)
+  if [ -d /etc/letsencrypt/live ]; then
+    printf "${WHITE} 💻 Verificando certificados SSL...${GRAY_LIGHT}\n"
+    # Tentar remover certificados relacionados (certbot delete não é interativo, então usamos rm)
+    sudo certbot delete --cert-name $(sudo certbot certificates 2>/dev/null | grep -A 2 "${empresa_delete}" | grep "Certificate Name" | awk '{print $3}') --non-interactive 2>/dev/null || true
+  fi
+
   sleep 2
 
-  sudo su - postgres
-  dropuser ${empresa_delete}
-  dropdb ${empresa_delete}
-  exit
+  # Remover banco de dados e usuário PostgreSQL
+  if sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw ${empresa_delete}; then
+    printf "${WHITE} 💻 Removendo banco de dados PostgreSQL...${GRAY_LIGHT}\n"
+    sudo -u postgres dropdb ${empresa_delete} 2>/dev/null || true
+  fi
+
+  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${empresa_delete}'" | grep -q 1; then
+    printf "${WHITE} 💻 Removendo usuário PostgreSQL...${GRAY_LIGHT}\n"
+    sudo -u postgres dropuser ${empresa_delete} 2>/dev/null || true
+  fi
+
+  sleep 2
+
+  # Remover diretório e processos PM2
+  sudo su - deploy <<EOF
+  if [ -d /home/deploy/${empresa_delete} ]; then
+    rm -rf /home/deploy/${empresa_delete}
+  fi
+  pm2 delete ${empresa_delete}-frontend ${empresa_delete}-backend 2>/dev/null || true
+  pm2 save
 EOF
 
-sleep 2
-
-sudo su - deploy <<EOF
- rm -rf /home/deploy/${empresa_delete}
- pm2 delete ${empresa_delete}-frontend ${empresa_delete}-backend
- pm2 save
-EOF
+  # Reiniciar nginx
+  sudo service nginx restart 2>/dev/null || true
 
   sleep 2
 
   print_banner
-  printf "${WHITE} 💻 Remoção da Instancia/Empresa ${empresa_delete} realizado com sucesso ...${GRAY_LIGHT}"
+  printf "${GREEN} ✅ Remoção da Instancia/Empresa ${empresa_delete} realizado com sucesso!${GRAY_LIGHT}"
   printf "\n\n"
 
-
   sleep 2
-
 }
 
 #######################################
@@ -173,33 +210,56 @@ configurar_dominio() {
   printf "${WHITE} 💻 Vamos Alterar os Dominios do Whaticket...${GRAY_LIGHT}"
   printf "\n\n"
 
-sleep 2
+  sleep 2
 
-  sudo su - root <<EOF
-  cd && rm -rf /etc/nginx/sites-enabled/${empresa_dominio}-frontend
-  cd && rm -rf /etc/nginx/sites-enabled/${empresa_dominio}-backend  
-  cd && rm -rf /etc/nginx/sites-available/${empresa_dominio}-frontend
-  cd && rm -rf /etc/nginx/sites-available/${empresa_dominio}-backend
-EOF
+  # Validar se a instância existe
+  if [ ! -d "/home/deploy/${empresa_dominio}" ]; then
+    printf "${RED} ❌ Instância ${empresa_dominio} não encontrada${GRAY_LIGHT}\n"
+    exit 1
+  fi
 
-sleep 2
+  # Normalizar URLs
+  alter_backend_url=$(echo "${alter_backend_url/https:\/\/}")
+  alter_backend_url=${alter_backend_url%%/*}
+  alter_backend_url=https://${alter_backend_url}
+  
+  alter_frontend_url=$(echo "${alter_frontend_url/https:\/\/}")
+  alter_frontend_url=${alter_frontend_url%%/*}
+  alter_frontend_url=https://${alter_frontend_url}
 
+  # Remover configurações antigas do nginx
+  sudo rm -f /etc/nginx/sites-enabled/${empresa_dominio}-frontend
+  sudo rm -f /etc/nginx/sites-enabled/${empresa_dominio}-backend
+  sudo rm -f /etc/nginx/sites-available/${empresa_dominio}-frontend
+  sudo rm -f /etc/nginx/sites-available/${empresa_dominio}-backend
+
+  sleep 2
+
+  # Atualizar arquivos .env
   sudo su - deploy <<EOF
-  cd && cd /home/deploy/${empresa_dominio}/frontend
-  sed -i "1c\REACT_APP_BACKEND_URL=https://${alter_backend_url}" .env
-  cd && cd /home/deploy/${empresa_dominio}/backend
-  sed -i "2c\BACKEND_URL=https://${alter_backend_url}" .env
-  sed -i "3c\FRONTEND_URL=https://${alter_frontend_url}" .env 
+  if [ -f /home/deploy/${empresa_dominio}/frontend/.env ]; then
+    sed -i "s|REACT_APP_BACKEND_URL=.*|REACT_APP_BACKEND_URL=${alter_backend_url}|" /home/deploy/${empresa_dominio}/frontend/.env
+  fi
+  
+  if [ -f /home/deploy/${empresa_dominio}/backend/.env ]; then
+    sed -i "s|BACKEND_URL=.*|BACKEND_URL=${alter_backend_url}|" /home/deploy/${empresa_dominio}/backend/.env
+    sed -i "s|FRONTEND_URL=.*|FRONTEND_URL=${alter_frontend_url}|" /home/deploy/${empresa_dominio}/backend/.env
+  fi
 EOF
 
-sleep 2
-   
-   backend_hostname=$(echo "${alter_backend_url/https:\/\/}")
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao atualizar arquivos .env${GRAY_LIGHT}\n"
+    exit 1
+  fi
 
- sudo su - root <<EOF
-  cat > /etc/nginx/sites-available/${empresa_dominio}-backend << 'END'
+  sleep 2
+   
+  backend_hostname=$(echo "${alter_backend_url/https:\/\/}")
+
+  # Criar configuração do nginx para backend
+  sudo tee /etc/nginx/sites-available/${empresa_dominio}-backend > /dev/null << END
 server {
-  server_name $backend_hostname;
+  server_name ${backend_hostname};
   location / {
     proxy_pass http://127.0.0.1:${alter_backend_port};
     proxy_http_version 1.1;
@@ -213,17 +273,17 @@ server {
   }
 }
 END
-ln -s /etc/nginx/sites-available/${empresa_dominio}-backend /etc/nginx/sites-enabled
-EOF
 
-sleep 2
+  sudo ln -sf /etc/nginx/sites-available/${empresa_dominio}-backend /etc/nginx/sites-enabled/
 
-frontend_hostname=$(echo "${alter_frontend_url/https:\/\/}")
+  sleep 2
 
-sudo su - root << EOF
-cat > /etc/nginx/sites-available/${empresa_dominio}-frontend << 'END'
+  frontend_hostname=$(echo "${alter_frontend_url/https:\/\/}")
+
+  # Criar configuração do nginx para frontend
+  sudo tee /etc/nginx/sites-available/${empresa_dominio}-frontend > /dev/null << END
 server {
-  server_name $frontend_hostname;
+  server_name ${frontend_hostname};
   location / {
     proxy_pass http://127.0.0.1:${alter_frontend_port};
     proxy_http_version 1.1;
@@ -237,32 +297,46 @@ server {
   }
 }
 END
-ln -s /etc/nginx/sites-available/${empresa_dominio}-frontend /etc/nginx/sites-enabled
-EOF
 
- sleep 2
-
- sudo su - root <<EOF
-  service nginx restart
-EOF
+  sudo ln -sf /etc/nginx/sites-available/${empresa_dominio}-frontend /etc/nginx/sites-enabled/
 
   sleep 2
 
-  backend_domain=$(echo "${backend_url/https:\/\/}")
-  frontend_domain=$(echo "${frontend_url/https:\/\/}")
+  # Testar configuração do nginx
+  sudo nginx -t
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro na configuração do nginx${GRAY_LIGHT}\n"
+    exit 1
+  fi
 
-  sudo su - root <<EOF
-  certbot -m $deploy_email \
+  sudo service nginx restart
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao reiniciar nginx${GRAY_LIGHT}\n"
+    exit 1
+  fi
+
+  sleep 2
+
+  # Obter certificados SSL
+  backend_domain=$(echo "${alter_backend_url/https:\/\/}")
+  frontend_domain=$(echo "${alter_frontend_url/https:\/\/}")
+
+  printf "${WHITE} 💻 Obtendo certificados SSL...${GRAY_LIGHT}\n"
+  sudo certbot -m ${deploy_email} \
           --nginx \
           --agree-tos \
           --non-interactive \
-          --domains $backend_domain,$frontend_domain
-EOF
+          --domains ${backend_domain},${frontend_domain} 2>&1
+
+  if [ $? -ne 0 ]; then
+    printf "${YELLOW} ⚠️  Aviso: Certbot pode ter encontrado problemas. Verifique manualmente.${GRAY_LIGHT}\n"
+  fi
 
   sleep 2
 
   print_banner
-  printf "${WHITE} 💻 Alteração de dominio da Instancia/Empresa ${empresa_dominio} realizado com sucesso ...${GRAY_LIGHT}"
+  printf "${GREEN} ✅ Alteração de dominio da Instancia/Empresa ${empresa_dominio} realizado com sucesso!${GRAY_LIGHT}"
   printf "\n\n"
 
   sleep 2
@@ -308,6 +382,16 @@ system_docker_install() {
 
   sleep 2
 
+  # Detectar distribuição e versão
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$ID
+    VERSION=$VERSION_ID
+  else
+    printf "${RED} ❌ Não foi possível detectar a distribuição${GRAY_LIGHT}\n"
+    exit 1
+  fi
+
   sudo su - root <<EOF
   apt install -y apt-transport-https \
                  ca-certificates curl \
@@ -315,10 +399,21 @@ system_docker_install() {
 
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
   
-  add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable"
+  # Usar a versão detectada ao invés de fixar "bionic"
+  add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable"
 
-  apt install -y docker-ce
+  apt update -y
+  apt install -y docker-ce docker-ce-cli containerd.io
+
+  # Iniciar e habilitar docker
+  systemctl start docker
+  systemctl enable docker
 EOF
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao instalar Docker${GRAY_LIGHT}\n"
+    exit 1
+  fi
 
   sleep 2
 }
@@ -484,10 +579,21 @@ system_nginx_restart() {
 
   sleep 2
 
-  sudo su - root <<EOF
-  service nginx restart
-EOF
+  # Testar configuração antes de reiniciar
+  sudo nginx -t
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro na configuração do nginx. Verifique os logs.${GRAY_LIGHT}\n"
+    return 1
+  fi
 
+  sudo service nginx restart
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao reiniciar nginx${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  printf "${GREEN} ✅ Nginx reiniciado com sucesso${GRAY_LIGHT}\n"
   sleep 2
 }
 
@@ -526,17 +632,36 @@ system_certbot_setup() {
 
   sleep 2
 
-  backend_domain=$(echo "${backend_url/https:\/\/}")
-  frontend_domain=$(echo "${frontend_url/https:\/\/}")
+  # Validar se as URLs foram definidas
+  if [ -z "${backend_url}" ] || [ -z "${frontend_url}" ]; then
+    printf "${RED} ❌ URLs do backend e frontend não foram definidas${GRAY_LIGHT}\n"
+    exit 1
+  fi
 
-  sudo su - root <<EOF
-  certbot -m $deploy_email \
+  backend_domain=$(echo "${backend_url/https:\/\/}")
+  backend_domain=${backend_domain%%/*}
+  frontend_domain=$(echo "${frontend_url/https:\/\/}")
+  frontend_domain=${frontend_domain%%/*}
+
+  # Validar formato dos domínios
+  if [ -z "${backend_domain}" ] || [ -z "${frontend_domain}" ]; then
+    printf "${RED} ❌ Domínios inválidos${GRAY_LIGHT}\n"
+    exit 1
+  fi
+
+  printf "${WHITE} 💻 Obtendo certificados SSL para ${backend_domain} e ${frontend_domain}...${GRAY_LIGHT}\n"
+
+  sudo certbot -m ${deploy_email} \
           --nginx \
           --agree-tos \
           --non-interactive \
-          --domains $backend_domain,$frontend_domain
+          --domains ${backend_domain},${frontend_domain} 2>&1
 
-EOF
+  if [ $? -ne 0 ]; then
+    printf "${YELLOW} ⚠️  Aviso: Certbot pode ter encontrado problemas. Verifique manualmente.${GRAY_LIGHT}\n"
+  else
+    printf "${GREEN} ✅ Certificados SSL configurados com sucesso${GRAY_LIGHT}\n"
+  fi
 
   sleep 2
 }
