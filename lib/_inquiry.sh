@@ -297,17 +297,61 @@ software_dominio() {
   configurar_dominio
 }
 
+#######################################
+# Installs additional instance (install_instancia flow)
+# Arguments:
+#   None
+#######################################
+install_additional_instance() {
+  # Validar dependências antes de continuar
+  if ! validate_dependencies; then
+    printf "${RED} ❌ Dependências faltando. Execute install_primaria primeiro.${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  # Coletar informações da instância
+  get_urls
+
+  # backend related
+  system_git_clone || { printf "${RED} ❌ Erro ao clonar repositório${GRAY_LIGHT}\n"; return 1; }
+  backend_set_env || { printf "${RED} ❌ Erro ao configurar variáveis de ambiente do backend${GRAY_LIGHT}\n"; return 1; }
+  backend_redis_create || { printf "${RED} ❌ Erro ao criar Redis e PostgreSQL${GRAY_LIGHT}\n"; return 1; }
+  backend_node_dependencies || { printf "${RED} ❌ Erro ao instalar dependências do backend${GRAY_LIGHT}\n"; return 1; }
+  backend_node_build || { printf "${RED} ❌ Erro ao compilar backend${GRAY_LIGHT}\n"; return 1; }
+  backend_db_migrate || { printf "${RED} ❌ Erro ao executar migrações${GRAY_LIGHT}\n"; return 1; }
+  backend_db_seed || { printf "${RED} ❌ Erro ao executar seeds${GRAY_LIGHT}\n"; return 1; }
+  backend_start_pm2 || { printf "${RED} ❌ Erro ao iniciar PM2 do backend${GRAY_LIGHT}\n"; return 1; }
+  backend_nginx_setup || { printf "${RED} ❌ Erro ao configurar nginx do backend${GRAY_LIGHT}\n"; return 1; }
+
+  # frontend related
+  frontend_set_env || { printf "${RED} ❌ Erro ao configurar variáveis de ambiente do frontend${GRAY_LIGHT}\n"; return 1; }
+  frontend_node_dependencies || { printf "${RED} ❌ Erro ao instalar dependências do frontend${GRAY_LIGHT}\n"; return 1; }
+  frontend_node_build || { printf "${RED} ❌ Erro ao compilar frontend${GRAY_LIGHT}\n"; return 1; }
+  frontend_start_pm2 || { printf "${RED} ❌ Erro ao iniciar PM2 do frontend${GRAY_LIGHT}\n"; return 1; }
+  frontend_nginx_setup || { printf "${RED} ❌ Erro ao configurar nginx do frontend${GRAY_LIGHT}\n"; return 1; }
+
+  # network related
+  system_nginx_restart || { printf "${RED} ❌ Erro ao reiniciar nginx${GRAY_LIGHT}\n"; return 1; }
+  system_certbot_setup || { printf "${YELLOW} ⚠️  Aviso: Problemas ao configurar certificados SSL${GRAY_LIGHT}\n"; }
+
+  print_banner
+  printf "${GREEN} ✅ Instalação concluída com sucesso!${GRAY_LIGHT}\n"
+  printf "${WHITE} 💻 Instância ${instancia_add} está pronta para uso.${GRAY_LIGHT}\n"
+  printf "\n"
+}
+
 inquiry_options() {
   
   print_banner
   printf "${WHITE} 💻 Bem vindo(a) ao Gerenciador SWL, Selecione abaixo a proxima ação!${GRAY_LIGHT}"
   printf "\n\n"
-  printf "   [0] Instalar whaticket\n"
-  printf "   [1] Atualizar whaticket\n"
-  printf "   [2] Deletar Whaticket\n"
-  printf "   [3] Bloquear Whaticket\n"
-  printf "   [4] Desbloquear Whaticket\n"
-  printf "   [5] Alter. dominio Whaticket\n"
+  printf "   [0] Instalar whaticket (Primeira instalação)\n"
+  printf "   [1] Instalar instância adicional\n"
+  printf "   [2] Atualizar whaticket\n"
+  printf "   [3] Deletar Whaticket\n"
+  printf "   [4] Bloquear Whaticket\n"
+  printf "   [5] Desbloquear Whaticket\n"
+  printf "   [6] Alter. dominio Whaticket\n"
   printf "\n"
   read -p "> " option
 
@@ -315,23 +359,28 @@ inquiry_options() {
     0) get_urls ;;
 
     1) 
-      software_update 
+      install_additional_instance
       exit
       ;;
 
     2) 
+      software_update 
+      exit
+      ;;
+
+    3) 
       software_delete 
       exit
       ;;
-    3) 
+    4) 
       software_bloquear 
       exit
       ;;
-    4) 
+    5) 
       software_desbloquear 
       exit
       ;;
-    5) 
+    6) 
       software_dominio 
       exit
       ;;        

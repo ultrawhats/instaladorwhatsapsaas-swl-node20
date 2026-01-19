@@ -36,6 +36,9 @@ source "${PROJECT_ROOT}"/config
 # interactive CLI
 inquiry_options
 
+# Se chegou aqui, significa que a opção 0 foi escolhida (Instalar whaticket - Primeira instalação)
+# As outras opções fazem exit dentro do inquiry_options
+
 # Nota: O usuário deploy é criado automaticamente em get_urls() quando opção 0 é escolhida
 # Se o usuário já existe (de instalação anterior), não há problema
 
@@ -84,5 +87,5 @@ system_certbot_setup
 print_banner
 printf "${GREEN} ✅ Instalação primária concluída com sucesso!${GRAY_LIGHT}\n"
 printf "${WHITE} 💻 Sistema pronto para instalar instâncias adicionais.${GRAY_LIGHT}\n"
-printf "${WHITE} 💻 Use: sudo ./install_instancia para instalar novas instâncias${GRAY_LIGHT}\n"
+printf "${WHITE} 💻 Use a opção [1] no menu ou execute: sudo ./install_instancia para instalar novas instâncias${GRAY_LIGHT}\n"
 printf "\n"
