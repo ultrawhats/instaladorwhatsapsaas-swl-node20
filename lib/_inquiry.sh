@@ -28,6 +28,22 @@ get_link_git() {
   done
 }
 
+get_git_username() {
+  print_banner
+  printf "${WHITE} 💻 Insira o usuário do GITHUB:${GRAY_LIGHT}"
+  printf "\n\n"
+  read -p "> " git_username
+}
+
+get_git_password() {
+  print_banner
+  printf "${WHITE} 💻 Insira a senha ou token de acesso do GITHUB:${GRAY_LIGHT}"
+  printf "${YELLOW} ⚠️  Para repositórios privados, use um Personal Access Token (PAT)${GRAY_LIGHT}"
+  printf "\n\n"
+  read -sp "> " git_password
+  printf "\n"
+}
+
 get_instancia_add() {
   
   print_banner
@@ -248,6 +264,8 @@ get_alter_backend_port() {
 get_urls() {
   get_mysql_root_password
   get_link_git
+  get_git_username
+  get_git_password
   get_instancia_add
   get_max_whats
   get_max_user

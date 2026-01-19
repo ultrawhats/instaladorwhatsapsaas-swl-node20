@@ -89,12 +89,39 @@ system_git_clone() {
     sudo rm -rf /home/deploy/${instancia_add}
   fi
 
-  sudo su - deploy <<EOF
-  git clone ${link_git} /home/deploy/${instancia_add}/
+  # Verificar se é URL HTTPS e precisa de autenticação
+  if [[ "${link_git}" =~ ^https:// ]]; then
+    # Se usuário e senha foram fornecidos, usar na URL
+    if [ -n "${git_username}" ] && [ -n "${git_password}" ]; then
+      # Extrair a parte da URL após https://
+      GIT_URL_PART=$(echo "${link_git}" | sed 's|https://||')
+      # Montar URL com credenciais
+      GIT_URL_WITH_AUTH="https://${git_username}:${git_password}@${GIT_URL_PART}"
+      
+      sudo su - deploy <<EOF
+      git clone ${GIT_URL_WITH_AUTH} /home/deploy/${instancia_add}/
 EOF
+    else
+      # Tentar clone normal (pode pedir credenciais interativamente)
+      sudo su - deploy <<EOF
+      git clone ${link_git} /home/deploy/${instancia_add}/
+EOF
+    fi
+  elif [[ "${link_git}" =~ ^git@ ]]; then
+    # SSH - não precisa de credenciais na URL
+    sudo su - deploy <<EOF
+      git clone ${link_git} /home/deploy/${instancia_add}/
+EOF
+  else
+    # URL não reconhecida, tentar clone normal
+    sudo su - deploy <<EOF
+      git clone ${link_git} /home/deploy/${instancia_add}/
+EOF
+  fi
 
   if [ $? -ne 0 ]; then
     printf "${RED} ❌ Erro ao clonar repositório Git${GRAY_LIGHT}\n"
+    printf "${YELLOW} 💻 Verifique se o repositório existe e se as credenciais estão corretas${GRAY_LIGHT}\n"
     return 1
   fi
 
@@ -103,6 +130,11 @@ EOF
     return 1
   fi
 
+  # Limpar credenciais da memória (segurança)
+  unset git_password
+  unset GIT_URL_WITH_AUTH
+
+  printf "${GREEN} ✅ Repositório clonado com sucesso${GRAY_LIGHT}\n"
   sleep 2
 }
 
