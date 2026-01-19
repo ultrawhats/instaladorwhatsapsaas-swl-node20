@@ -256,6 +256,15 @@ get_urls() {
   get_frontend_port
   get_backend_port
   get_redis_port
+  
+  # Criar usuário deploy se não existir (após coletar a senha)
+  if ! check_deploy_user; then
+    printf "${WHITE} 💻 Criando usuário deploy...${GRAY_LIGHT}\n"
+    if ! ensure_deploy_user; then
+      printf "${RED} ❌ Não foi possível criar o usuário deploy.${GRAY_LIGHT}\n"
+      exit 1
+    fi
+  fi
 }
 
 software_update() {

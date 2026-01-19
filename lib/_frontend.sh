@@ -14,6 +14,12 @@ frontend_node_dependencies() {
 
   sleep 2
 
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   if [ ! -d "/home/deploy/${instancia_add}/frontend" ]; then
     printf "${RED} ❌ Diretório do frontend não encontrado${GRAY_LIGHT}\n"
     return 1
@@ -43,6 +49,12 @@ frontend_node_build() {
   printf "\n\n"
 
   sleep 2
+
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   if [ ! -d "/home/deploy/${instancia_add}/frontend" ]; then
     printf "${RED} ❌ Diretório do frontend não encontrado${GRAY_LIGHT}\n"
@@ -107,6 +119,12 @@ frontend_set_env() {
 
   sleep 2
 
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   # ensure idempotency
   backend_url=$(echo "${backend_url/https:\/\/}")
   backend_url=${backend_url%%/*}
@@ -150,6 +168,12 @@ frontend_start_pm2() {
   printf "\n\n"
 
   sleep 2
+
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   if [ ! -f "/home/deploy/${instancia_add}/frontend/server.js" ]; then
     printf "${RED} ❌ Arquivo server.js não encontrado${GRAY_LIGHT}\n"

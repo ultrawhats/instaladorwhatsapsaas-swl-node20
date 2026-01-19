@@ -42,6 +42,9 @@ if ! validate_dependencies; then
   exit 1
 fi
 
+# Nota: O usuário deploy é criado automaticamente em get_urls() quando opção 0 é escolhida
+# Se outras opções forem escolhidas, o usuário deploy já deve existir (criado pelo install_primaria)
+
 # dependencies related
 #system_update
 #system_node_install

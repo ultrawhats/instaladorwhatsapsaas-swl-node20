@@ -36,6 +36,9 @@ source "${PROJECT_ROOT}"/config
 # interactive CLI
 inquiry_options
 
+# Nota: O usuário deploy é criado automaticamente em get_urls() quando opção 0 é escolhida
+# Se o usuário já existe (de instalação anterior), não há problema
+
 # dependencies related
 system_update
 system_node_install
@@ -47,7 +50,13 @@ system_nginx_install
 system_certbot_install
 
 # system config
-system_create_user
+# system_create_user - Agora é chamado automaticamente em get_urls() quando necessário
+# Mas vamos garantir que o usuário existe antes de continuar (para compatibilidade)
+if ! check_deploy_user; then
+  # Se chegou aqui sem o usuário, algo deu errado
+  printf "${RED} ❌ Usuário deploy não foi criado. Execute o script novamente e escolha a opção de instalação.${GRAY_LIGHT}\n"
+  exit 1
+fi
 
 # backend related
 system_git_clone

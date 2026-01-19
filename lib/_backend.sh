@@ -68,6 +68,12 @@ backend_set_env() {
 
   sleep 2
 
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   # ensure idempotency
   backend_url=$(echo "${backend_url/https:\/\/}")
   backend_url=${backend_url%%/*}
@@ -128,6 +134,12 @@ backend_node_dependencies() {
 
   sleep 2
 
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
     printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
     return 1
@@ -157,6 +169,12 @@ backend_node_build() {
   printf "\n\n"
 
   sleep 2
+
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
     printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
@@ -225,6 +243,12 @@ backend_db_migrate() {
 
   sleep 2
 
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
     printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
     return 1
@@ -255,6 +279,12 @@ backend_db_seed() {
 
   sleep 2
 
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
+
   if [ ! -d "/home/deploy/${instancia_add}/backend" ]; then
     printf "${RED} ❌ Diretório do backend não encontrado${GRAY_LIGHT}\n"
     return 1
@@ -284,6 +314,12 @@ backend_start_pm2() {
   printf "\n\n"
 
   sleep 2
+
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   if [ ! -f "/home/deploy/${instancia_add}/backend/dist/server.js" ]; then
     printf "${RED} ❌ Arquivo compilado não encontrado${GRAY_LIGHT}\n"

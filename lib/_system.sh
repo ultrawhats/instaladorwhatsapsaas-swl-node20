@@ -9,16 +9,51 @@
 #######################################
 system_create_user() {
   print_banner
-  printf "${WHITE} 💻 Agora, vamos criar o usuário para a instancia...${GRAY_LIGHT}"
+  printf "${WHITE} 💻 Verificando usuário deploy...${GRAY_LIGHT}"
   printf "\n\n"
 
   sleep 2
 
-  sudo su - root <<EOF
-  useradd -m -p $(openssl passwd -crypt ${mysql_root_password}) -s /bin/bash -G sudo deploy
-  usermod -aG sudo deploy
-EOF
+  # Verificar se o usuário já existe
+  if id "deploy" &>/dev/null; then
+    printf "${GREEN} ✅ Usuário deploy já existe${GRAY_LIGHT}\n"
+    # Garantir que está no grupo sudo
+    sudo usermod -aG sudo deploy 2>/dev/null || true
+    sleep 2
+    return 0
+  fi
 
+  printf "${WHITE} 💻 Criando usuário deploy...${GRAY_LIGHT}\n"
+
+  # Validar se a senha foi definida
+  if [ -z "${mysql_root_password}" ]; then
+    printf "${RED} ❌ Senha não foi definida. Execute o script novamente.${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  # Criar usuário com senha criptografada
+  sudo useradd -m -p $(openssl passwd -crypt "${mysql_root_password}") -s /bin/bash deploy
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao criar usuário deploy${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  # Adicionar ao grupo sudo
+  sudo usermod -aG sudo deploy
+
+  if [ $? -ne 0 ]; then
+    printf "${RED} ❌ Erro ao adicionar usuário ao grupo sudo${GRAY_LIGHT}\n"
+    return 1
+  fi
+
+  # Criar diretório home se não existir
+  if [ ! -d "/home/deploy" ]; then
+    sudo mkdir -p /home/deploy
+    sudo chown deploy:deploy /home/deploy
+  fi
+
+  printf "${GREEN} ✅ Usuário deploy criado com sucesso${GRAY_LIGHT}\n"
   sleep 2
 }
 
@@ -33,6 +68,12 @@ system_git_clone() {
   printf "\n\n"
 
   sleep 2
+
+  # Verificar se o usuário deploy existe
+  if ! check_deploy_user; then
+    printf "${RED} ❌ Usuário deploy não existe!${GRAY_LIGHT}\n"
+    return 1
+  fi
 
   # Verificar se o diretório já existe
   if [ -d "/home/deploy/${instancia_add}" ]; then
